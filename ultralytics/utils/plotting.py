@@ -514,9 +514,7 @@ class Annotator:
                     cv2.circle(self.im, (int(x_coord), int(y_coord)), radius, (0, 255, 0), -1, lineType=cv2.LINE_AA)
         return self.im
 
-    def plot_angle_and_count_and_stage(
-        self, angle_text, count_text, stage_text, center_kpt, color=(104, 31, 17), txt_color=(255, 255, 255)
-    ):
+    def plot_angle_and_count_and_stage(self, angle_text, count_text, stage_text, center_kpt, color=(104, 31, 17), txt_color=(255, 255, 255)):
         """
         Plot the pose angle, count value and step stage.
 
@@ -610,9 +608,7 @@ class Annotator:
             -1,
         )
 
-        cv2.putText(
-            self.im, label, (int(mask[0][0]) - text_size[0] // 2, int(mask[0][1]) - 5), 0, 0.7, (255, 255, 255), 2
-        )
+        cv2.putText(self.im, label, (int(mask[0][0]) - text_size[0] // 2, int(mask[0][1]) - 5), 0, 0.7, (255, 255, 255), 2)
 
     def plot_distance_and_line(self, distance_m, distance_mm, centroids, line_color, centroid_color):
         """
@@ -853,6 +849,10 @@ def plot_images(
                 boxes[..., 1] += y
                 is_obb = boxes.shape[-1] == 5  # xywhr
                 boxes = ops.xywhr2xyxyxyxy(boxes) if is_obb else ops.xywh2xyxy(boxes)
+                # 检查并处理无效值
+                if np.isnan(boxes).any() or np.isinf(boxes).any():
+                    # 删除boxes中的无效值
+                    boxes = boxes[~np.isnan(boxes).any(axis=1)]
                 for j, box in enumerate(boxes.astype(np.int64).tolist()):
                     c = classes[j]
                     color = colors(c)
@@ -905,9 +905,7 @@ def plot_images(
                         else:
                             mask = image_masks[j].astype(bool)
                         with contextlib.suppress(Exception):
-                            im[y : y + h, x : x + w, :][mask] = (
-                                im[y : y + h, x : x + w, :][mask] * 0.4 + np.array(color) * 0.6
-                            )
+                            im[y : y + h, x : x + w, :][mask] = im[y : y + h, x : x + w, :][mask] * 0.4 + np.array(color) * 0.6
                 annotator.fromarray(im)
     if not save:
         return np.asarray(annotator.im)

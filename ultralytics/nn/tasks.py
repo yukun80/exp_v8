@@ -72,7 +72,8 @@ except ImportError:
 
 
 class BaseModel(nn.Module):
-    """The BaseModel class serves as a base class for all the models in the Ultralytics YOLO family."""
+    """The BaseModel class serves as a base class for all the models in the Ultralytics YOLO family.
+    BaseModel 类是所有 YOLO 模型的基类，定义了模型的基本结构和方法"""
 
     def forward(self, x, *args, **kwargs):
         """
@@ -302,6 +303,7 @@ class DetectionModel(BaseModel):
 
         # Init weights, biases
         initialize_weights(self)
+        # verbose控制日志信息的详细程度
         if verbose:
             self.info()
             LOGGER.info("")
@@ -816,7 +818,7 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
 
     model = model.fuse().eval() if fuse and hasattr(model, "fuse") else model.eval()  # model in eval mode
 
-    # Module updates
+    # Module updates 如果 fuse 为 True 且模型具有 fuse 方法，则融合模型并将其设置为评估模式；否则，仅将模型设置为评估模式。
     for m in model.modules():
         if hasattr(m, "inplace"):
             m.inplace = inplace
@@ -828,7 +830,8 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
 
 
 def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
-    """Parse a YOLO model.yaml dictionary into a PyTorch model."""
+    """Parse a YOLO model.yaml dictionary into a PyTorch model.
+    将一个 YOLO 模型的 YAML 配置文件解析为一个 PyTorch 模型"""
     import ast
 
     # Args

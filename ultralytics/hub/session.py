@@ -1,5 +1,5 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
-
+"""主要负责模型的初始化、心跳监测和检查点管理。"""
 import threading
 import time
 from http import HTTPStatus
@@ -194,9 +194,7 @@ class HUBTrainingSession:
             self.train_args = self.model.data.get("train_args")  # new response
 
             # Set the model file as either a *.pt or *.yaml file
-            self.model_file = (
-                self.model.get_weights_url("parent") if self.model.is_pretrained() else self.model.get_architecture()
-            )
+            self.model_file = self.model.get_weights_url("parent") if self.model.is_pretrained() else self.model.get_architecture()
 
         if "data" not in self.train_args:
             # RF bug - datasets are sometimes not exported

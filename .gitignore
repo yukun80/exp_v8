@@ -39,8 +39,11 @@ MANIFEST
 *.tif
 *.tiff
 *.cache
+*.txt
 
-
+# 路径
+fastsam_output/
+wandb/
 
 # Installer logs
 pip-log.txt

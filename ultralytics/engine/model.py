@@ -433,7 +433,6 @@ class Model(nn.Module):
             source = ASSETS
             LOGGER.warning(f"WARNING ⚠️ 'source' is missing. Using 'source={source}'.")
 
-
         """确定当前代码是否是通过命令行界面运行的。
         这部分代码检查ARGV列表的第一个元素（通常是执行的脚本或命令）是否以"yolo"或"ultralytics"结束。
         第二个检查ARGV列表中是否包含"predict"、"track"、"mode=predict"或"mode=track"中的任一元素。"""
@@ -614,17 +613,17 @@ class Model(nn.Module):
         **kwargs,
     ):
         """
-        Trains the model using the specified dataset and training configuration.
+        使用指定的数据集和训练配置训练模型。
 
-        This method facilitates model training with a range of customizable settings and configurations. It supports
-        training with a custom trainer or the default training approach defined in the method. The method handles
-        different scenarios, such as resuming training from a checkpoint, integrating with Ultralytics HUB, and
-        updating model and configuration after training.
+        这种方法通过一系列可定制的设置和配置来促进模型训练。它支持
+        使用自定义培训师或方法中定义的默认培训方法进行培训。该方法处理
+        不同的场景，例如从检查点恢复训练，与Ultralytics HUB集成，以及
+        培训后更新模型和配置。
 
-        When using Ultralytics HUB, if the session already has a loaded model, the method prioritizes HUB training
-        arguments and issues a warning if local arguments are provided. It checks for pip updates and combines default
-        configurations, method-specific defaults, and user-provided arguments to configure the training process. After
-        training, it updates the model and its configurations, and optionally attaches metrics.
+        当使用Ultralytics HUB时，如果会话已经有一个加载的模型，该方法将优先考虑HUB训练
+        参数，并在提供局部参数时发出警告。它检查pip更新并合并默认值
+        配置，特定于方法的默认值，以及用户提供的配置训练过程的参数。后
+        训练时，它更新模型及其配置，并选择性地附加度量。
 
         Args:
             trainer (BaseTrainer, optional): An instance of a custom trainer class for training the model. If None, the
@@ -640,13 +639,13 @@ class Model(nn.Module):
             PermissionError: If there is a permission issue with the HUB session.
             ModuleNotFoundError: If the HUB SDK is not installed.
         """
-        self._check_is_pytorch_model()
-        if hasattr(self.session, "model") and self.session.model.id:  # Ultralytics HUB session with loaded model
-            if any(kwargs):
-                LOGGER.warning("WARNING ⚠️ using HUB training arguments, ignoring local training arguments.")
-            kwargs = self.session.train_args  # overwrite kwargs
+        # self._check_is_pytorch_model()
+        # if hasattr(self.session, "model") and self.session.model.id:  # Ultralytics HUB session with loaded model
+        #     if any(kwargs):
+        #         LOGGER.warning("WARNING ⚠️ using HUB training arguments, ignoring local training arguments.")
+        #     kwargs = self.session.train_args  # overwrite kwargs
 
-        checks.check_pip_update_available()
+        # checks.check_pip_update_available()
 
         overrides = yaml_load(checks.check_yaml(kwargs["cfg"])) if kwargs.get("cfg") else self.overrides
         custom = {
@@ -678,6 +677,7 @@ class Model(nn.Module):
                     pass
 
         self.trainer.hub_session = self.session  # attach optional HUB session
+        """开始加载数据并进行训练"""
         self.trainer.train()
         # Update model and cfg after training
         if RANK in {-1, 0}:

@@ -1,5 +1,6 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
-"""Base callbacks."""
+"""Base callbacks.
+定义了一系列用于训练、验证、预测和导出过程的回调函数。这些回调函数在不同的训练阶段被调用，以便在特定事件发生时执行特定的操作。"""
 
 from collections import defaultdict
 from copy import deepcopy

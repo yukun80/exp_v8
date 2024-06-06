@@ -1,7 +1,7 @@
 # Ultralytics YOLO 🚀, AGPL-3.0 license
 """
 Ultralytics modules.
-
+当你使用 from module import * 语句时，__all__ 变量定义了哪些名称会被导入到当前的命名空间中。
 Example:
     Visualize a module with Netron.
     ```python

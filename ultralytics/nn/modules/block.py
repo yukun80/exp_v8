@@ -323,7 +323,7 @@ class GhostBottleneck(nn.Module):
 
 
 class Bottleneck(nn.Module):
-    """Standard bottleneck."""
+    """Standard bottleneck. 残差块2333"""
 
     def __init__(self, c1, c2, shortcut=True, g=1, k=(3, 3), e=0.5):
         """Initializes a bottleneck module with given input/output channels, shortcut option, group, kernels, and

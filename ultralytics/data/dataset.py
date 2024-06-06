@@ -73,17 +73,21 @@ class YOLODataset(BaseDataset):
         Returns:
             (dict): labels.
         """
+        # 初始化标签字典和计数器
         x = {"labels": []}
-        nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # number missing, found, empty, corrupt, messages
+        nm, nf, ne, nc, msgs = 0, 0, 0, 0, []  # 缺失的、找到的、空的、损坏的图像数量和消息列表
         desc = f"{self.prefix}Scanning {path.parent / path.stem}..."
         total = len(self.im_files)
+        # 获取关键点的形状信息
         nkpt, ndim = self.data.get("kpt_shape", (0, 0))
         if self.use_keypoints and (nkpt <= 0 or ndim not in {2, 3}):
             raise ValueError(
                 "'kpt_shape' in data.yaml missing or incorrect. Should be a list with [number of "
                 "keypoints, number of dims (2 for x,y or 3 for x,y,visible)], i.e. 'kpt_shape: [17, 3]'"
             )
+        # 使用多线程处理图像和标签文件
         with ThreadPool(NUM_THREADS) as pool:
+            """func: 检查图像和标签"""
             results = pool.imap(
                 func=verify_image_label,
                 iterable=zip(
@@ -131,18 +135,23 @@ class YOLODataset(BaseDataset):
         return x
 
     def get_labels(self):
-        """Returns dictionary of labels for YOLO training."""
+        """Returns dictionary of labels for YOLO training.
+        # 获取图像对应的标签文件路径"""
         self.label_files = img2label_paths(self.im_files)
+        # print("----------debug0:", self.label_files)
         cache_path = Path(self.label_files[0]).parent.with_suffix(".cache")
         try:
+            # print("----------debug1:", "exist cache file")
             cache, exists = load_dataset_cache_file(cache_path), True  # attempt to load a *.cache file
-            assert cache["version"] == DATASET_CACHE_VERSION  # matches current version
-            assert cache["hash"] == get_hash(self.label_files + self.im_files)  # identical hash
+            assert cache["version"] == DATASET_CACHE_VERSION  # 检查缓存文件的版本是否匹配
+            assert cache["hash"] == get_hash(self.label_files + self.im_files)  # 检查缓存文件的哈希值是否与当前数据集的哈希值一致
         except (FileNotFoundError, AssertionError, AttributeError):
+            # print("----------debug1:", "not exist cache file")
+            # 如果缓存文件不存在或哈希值不匹配，则重新缓存标签
             cache, exists = self.cache_labels(cache_path), False  # run cache ops
 
-        # Display cache
-        nf, nm, ne, nc, n = cache.pop("results")  # found, missing, empty, corrupt, total
+        # 显示缓存信息
+        nf, nm, ne, nc, n = cache.pop("results")  # 分别是找到的、缺失的、空的、损坏的和总数
         if exists and LOCAL_RANK in {-1, 0}:
             d = f"Scanning {cache_path}... {nf} images, {nm + ne} backgrounds, {nc} corrupt"
             TQDM(None, desc=self.prefix + d, total=n, initial=n)  # display results
@@ -150,13 +159,14 @@ class YOLODataset(BaseDataset):
                 LOGGER.info("\n".join(cache["msgs"]))  # display warnings
 
         # Read cache
-        [cache.pop(k) for k in ("hash", "version", "msgs")]  # remove items
+        [cache.pop(k) for k in ("hash", "version", "msgs")]  # # 移除不需要的键
         labels = cache["labels"]
         if not labels:
             LOGGER.warning(f"WARNING ⚠️ No images found in {cache_path}, training may not work correctly. {HELP_URL}")
+        # 更新图像文件路径列表
         self.im_files = [lb["im_file"] for lb in labels]  # update im_files
 
-        # Check if the dataset is all boxes or all segments
+        # # 检查数据集是全框还是全分割
         lengths = ((len(lb["cls"]), len(lb["bboxes"]), len(lb["segments"])) for lb in labels)
         len_cls, len_boxes, len_segments = (sum(x) for x in zip(*lengths))
         if len_segments and len_boxes != len_segments:
@@ -172,7 +182,7 @@ class YOLODataset(BaseDataset):
         return labels
 
     def build_transforms(self, hyp=None):
-        """Builds and appends transforms to the list."""
+        """Builds and appends transforms to the list. 数据增强23333333"""
         if self.augment:
             hyp.mosaic = hyp.mosaic if self.augment and not self.rect else 0.0
             hyp.mixup = hyp.mixup if self.augment and not self.rect else 0.0
@@ -195,7 +205,11 @@ class YOLODataset(BaseDataset):
         return transforms
 
     def close_mosaic(self, hyp):
-        """Sets mosaic, copy_paste and mixup options to 0.0 and builds transformations."""
+        """Sets mosaic, copy_paste and mixup options to 0.0 and builds transformations.
+        mosaic数据增强是一种图像处理技术，可以将四张图像拼接成一张新的图像，以增加模型的泛化能力。
+        copy_paste数据增强是一种图像处理技术，可以将图像的一部分复制并粘贴到同一图像的其他位置，以增加模型的泛化能力。
+        mixup数据增强是一种图像处理技术，可以将两张图像以一定比例混合成一张新的图像，以增加模型的泛化能力。
+        """
         hyp.mosaic = 0.0  # set mosaic ratio=0.0
         hyp.copy_paste = 0.0  # keep the same behavior as previous v8 close-mosaic
         hyp.mixup = 0.0  # keep the same behavior as previous v8 close-mosaic
