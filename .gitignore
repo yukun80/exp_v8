@@ -45,6 +45,7 @@ MANIFEST
 fastsam_output/
 wandb/
 datasets/
+results/
 
 # Installer logs
 pip-log.txt
