@@ -12,6 +12,10 @@ from multiprocessing.pool import ThreadPool
 from pathlib import Path
 from tarfile import is_tarfile
 
+# 2333333
+import rasterio
+from rasterio.errors import RasterioIOError
+
 import cv2
 import numpy as np
 from PIL import Image, ImageOps
@@ -69,67 +73,161 @@ def exif_size(img: Image.Image):
     return s
 
 
+# def verify_image(args):
+#     """Verify one image."""
+#     (im_file, cls), prefix = args
+#     # Number (found, corrupt), message
+#     nf, nc, msg = 0, 0, ""
+#     try:
+#         im = Image.open(im_file)
+#         im.verify()  # PIL verify
+#         shape = exif_size(im)  # image size
+#         shape = (shape[1], shape[0])  # hw
+#         assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
+#         assert im.format.lower() in IMG_FORMATS, f"Invalid image format {im.format}. {FORMATS_HELP_MSG}"
+#         # 如果图像的格式是 "jpg" 或 "jpeg"，函数会进一步检查图像是否损坏。
+#         if im.format.lower() in {"jpg", "jpeg"}:
+#             with open(im_file, "rb") as f:
+#                 f.seek(-2, 2)
+#                 if f.read() != b"\xff\xd9":  # corrupt JPEG
+#                     ImageOps.exif_transpose(Image.open(im_file)).save(im_file, "JPEG", subsampling=0, quality=100)
+#                     msg = f"{prefix}WARNING ⚠️ {im_file}: corrupt JPEG restored and saved"
+#         nf = 1
+#     except Exception as e:
+#         nc = 1
+#         msg = f"{prefix}WARNING ⚠️ {im_file}: ignoring corrupt image/label: {e}"
+#     return (im_file, cls), nf, nc, msg
+
+
 def verify_image(args):
     """Verify one image."""
     (im_file, cls), prefix = args
     # Number (found, corrupt), message
     nf, nc, msg = 0, 0, ""
     try:
-        im = Image.open(im_file)
-        im.verify()  # PIL verify
-        shape = exif_size(im)  # image size
-        shape = (shape[1], shape[0])  # hw
-        assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
-        assert im.format.lower() in IMG_FORMATS, f"Invalid image format {im.format}. {FORMATS_HELP_MSG}"
-        if im.format.lower() in {"jpg", "jpeg"}:
-            with open(im_file, "rb") as f:
-                f.seek(-2, 2)
-                if f.read() != b"\xff\xd9":  # corrupt JPEG
-                    ImageOps.exif_transpose(Image.open(im_file)).save(im_file, "JPEG", subsampling=0, quality=100)
-                    msg = f"{prefix}WARNING ⚠️ {im_file}: corrupt JPEG restored and saved"
-        nf = 1
-    except Exception as e:
+        with rasterio.open(im_file) as src:
+            shape = src.shape  # image size
+            assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
+            # assert src.count == 3, f"Invalid number of bands {src.count}. TIF should have 3 bands (RGB)."
+            nf = 1
+    except RasterioIOError as e:
         nc = 1
         msg = f"{prefix}WARNING ⚠️ {im_file}: ignoring corrupt image/label: {e}"
+    except Exception as e:
+        nc = 1
+        msg = f"{prefix}WARNING ⚠️ {im_file}: an unexpected error occurred: {e}"
     return (im_file, cls), nf, nc, msg
+
+
+# def verify_image_label(args):
+#     """Verify one image-label pair."""
+#     im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim = args
+#     # Number (missing, found, empty, corrupt), message, segments, keypoints
+#     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
+#     try:
+#         # Verify images
+#         im = Image.open(im_file)
+#         im.verify()  # PIL verify
+#         shape = exif_size(im)  # image size
+#         shape = (shape[1], shape[0])  # hw
+#         assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
+#         assert im.format.lower() in IMG_FORMATS, f"invalid image format {im.format}. {FORMATS_HELP_MSG}"
+#         if im.format.lower() in {"jpg", "jpeg"}:
+#             with open(im_file, "rb") as f:
+#                 f.seek(-2, 2)
+#                 if f.read() != b"\xff\xd9":  # corrupt JPEG
+#                     ImageOps.exif_transpose(Image.open(im_file)).save(im_file, "JPEG", subsampling=0, quality=100)
+#                     msg = f"{prefix}WARNING ⚠️ {im_file}: corrupt JPEG restored and saved"
+
+#         # Verify labels
+#         if os.path.isfile(lb_file):
+#             nf = 1  # label found
+#             with open(lb_file) as f:
+#                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
+#                 if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
+#                     classes = np.array([x[0] for x in lb], dtype=np.float32)
+#                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
+#                     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
+#                 lb = np.array(lb, dtype=np.float32)
+#             nl = len(lb)
+#             if nl:
+#                 if keypoint:
+#                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
+#                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
+#                 else:
+#                     assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
+#                     points = lb[:, 1:]
+#                 assert points.max() <= 1, f"non-normalized or out of bounds coordinates {points[points > 1]}"
+#                 assert lb.min() >= 0, f"negative label values {lb[lb < 0]}"
+
+#                 # All labels
+#                 max_cls = lb[:, 0].max()  # max label count
+#                 assert max_cls <= num_cls, (
+#                     f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. " f"Possible class labels are 0-{num_cls - 1}"
+#                 )
+#                 _, i = np.unique(lb, axis=0, return_index=True)
+#                 if len(i) < nl:  # duplicate row check
+#                     lb = lb[i]  # remove duplicates
+#                     if segments:
+#                         segments = [segments[x] for x in i]
+#                     msg = f"{prefix}WARNING ⚠️ {im_file}: {nl - len(i)} duplicate labels removed"
+#             else:
+#                 ne = 1  # label empty
+#                 lb = np.zeros((0, (5 + nkpt * ndim) if keypoint else 5), dtype=np.float32)
+#         else:
+#             nm = 1  # label missing
+#             lb = np.zeros((0, (5 + nkpt * ndim) if keypoints else 5), dtype=np.float32)
+#         if keypoint:
+#             keypoints = lb[:, 5:].reshape(-1, nkpt, ndim)
+#             if ndim == 2:
+#                 kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
+#                 keypoints = np.concatenate([keypoints, kpt_mask[..., None]], axis=-1)  # (nl, nkpt, 3)
+#         lb = lb[:, :5]
+#         return im_file, lb, shape, segments, keypoints, nm, nf, ne, nc, msg
+#     except Exception as e:
+#         nc = 1
+#         msg = f"{prefix}WARNING ⚠️ {im_file}: ignoring corrupt image/label: {e}"
+#         return [None, None, None, None, None, nm, nf, ne, nc, msg]
 
 
 def verify_image_label(args):
     """Verify one image-label pair."""
+    # print("----------------debug0:", "start verify_image_label")
     im_file, lb_file, prefix, keypoint, num_cls, nkpt, ndim = args
     # Number (missing, found, empty, corrupt), message, segments, keypoints
     nm, nf, ne, nc, msg, segments, keypoints = 0, 0, 0, 0, "", [], None
     try:
         # Verify images
-        im = Image.open(im_file)
-        im.verify()  # PIL verify
-        shape = exif_size(im)  # image size
-        shape = (shape[1], shape[0])  # hw
-        assert (shape[0] > 9) & (shape[1] > 9), f"image size {shape} <10 pixels"
-        assert im.format.lower() in IMG_FORMATS, f"invalid image format {im.format}. {FORMATS_HELP_MSG}"
-        if im.format.lower() in {"jpg", "jpeg"}:
-            with open(im_file, "rb") as f:
-                f.seek(-2, 2)
-                if f.read() != b"\xff\xd9":  # corrupt JPEG
-                    ImageOps.exif_transpose(Image.open(im_file)).save(im_file, "JPEG", subsampling=0, quality=100)
-                    msg = f"{prefix}WARNING ⚠️ {im_file}: corrupt JPEG restored and saved"
+        with rasterio.open(im_file) as src:
+            im = src.read()  # Read all bands
+            assert im.shape[1] > 9 and im.shape[2] > 9, f"image size {im.shape[1:]} <10 pixels"
+            shape = im.shape[1:3]  # height, width
 
+        # print("----------------debug1:", "images are no mistakes")
         # Verify labels
         if os.path.isfile(lb_file):
+            """检查给定的标注文件（lb_file）是否存在。如果文件存在，则继续处理。"""
+            # print("-----------------debug2:", "label exist")
             nf = 1  # label found
             with open(lb_file) as f:
+                # 读取文件内容并将其分割成一个列表。每一行被分割成一个子列表，其中每个元素都是一个字符串。
                 lb = [x.split() for x in f.read().strip().splitlines() if len(x)]
+                # 任何一行的长度超过6并且不是关键点标注（keypoint），则认为这是段标注。
+                # 将类标签和段信息分别处理后，合并为一个新的数组。
                 if any(len(x) > 6 for x in lb) and (not keypoint):  # is segment
                     classes = np.array([x[0] for x in lb], dtype=np.float32)
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
                     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
-                lb = np.array(lb, dtype=np.float32)
+                lb = np.array(lb, dtype=np.float32)  # 将处理后的标注列表转换为NumPy数组。
             nl = len(lb)
+            # 检查标注数量
             if nl:
+                # print("-----------------debug3:", "label is not empty")
                 if keypoint:
                     assert lb.shape[1] == (5 + nkpt * ndim), f"labels require {(5 + nkpt * ndim)} columns each"
                     points = lb[:, 5:].reshape(-1, ndim)[:, :2]
                 else:
+                    # 检查列数是否为5，并提取坐标信息。
                     assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
                     points = lb[:, 1:]
                 assert points.max() <= 1, f"non-normalized or out of bounds coordinates {points[points > 1]}"
@@ -138,9 +236,9 @@ def verify_image_label(args):
                 # All labels
                 max_cls = lb[:, 0].max()  # max label count
                 assert max_cls <= num_cls, (
-                    f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. "
-                    f"Possible class labels are 0-{num_cls - 1}"
+                    f"Label class {int(max_cls)} exceeds dataset class count {num_cls}. " f"Possible class labels are 0-{num_cls - 1}"
                 )
+                """找出并删除重复的标注行。"""
                 _, i = np.unique(lb, axis=0, return_index=True)
                 if len(i) < nl:  # duplicate row check
                     lb = lb[i]  # remove duplicates
@@ -148,12 +246,15 @@ def verify_image_label(args):
                         segments = [segments[x] for x in i]
                     msg = f"{prefix}WARNING ⚠️ {im_file}: {nl - len(i)} duplicate labels removed"
             else:
+                """如果没有标注，设置标注为空的数组。"""
                 ne = 1  # label empty
                 lb = np.zeros((0, (5 + nkpt * ndim) if keypoint else 5), dtype=np.float32)
         else:
+            # print("--------------debug4:", "label is missing")
             nm = 1  # label missing
             lb = np.zeros((0, (5 + nkpt * ndim) if keypoints else 5), dtype=np.float32)
         if keypoint:
+            # print("--------------debug5:", "setting keypoint")
             keypoints = lb[:, 5:].reshape(-1, nkpt, ndim)
             if ndim == 2:
                 kpt_mask = np.where((keypoints[..., 0] < 0) | (keypoints[..., 1] < 0), 0.0, 1.0).astype(np.float32)
@@ -251,7 +352,7 @@ def find_dataset_yaml(path: Path) -> Path:
 
 
 def check_det_dataset(dataset, autodownload=True):
-    """
+    """检查并加载检测数据集
     Download, verify, and/or unzip a dataset if not found locally.
 
     This function checks the availability of a specified dataset, and if not found, it has the option to download and
@@ -282,9 +383,7 @@ def check_det_dataset(dataset, autodownload=True):
     for k in "train", "val":
         if k not in data:
             if k != "val" or "validation" not in data:
-                raise SyntaxError(
-                    emojis(f"{dataset} '{k}:' key missing ❌.\n'train' and 'val' are required in all data YAMLs.")
-                )
+                raise SyntaxError(emojis(f"{dataset} '{k}:' key missing ❌.\n'train' and 'val' are required in all data YAMLs."))
             LOGGER.info("WARNING ⚠️ renaming data YAML 'validation' key to 'val' to match YOLO format.")
             data["val"] = data.pop("validation")  # replace 'validation' key with 'val' key
     if "names" not in data and "nc" not in data:
@@ -385,11 +484,7 @@ def check_cls_dataset(dataset, split=""):
         LOGGER.info(s)
     train_set = data_dir / "train"
     val_set = (
-        data_dir / "val"
-        if (data_dir / "val").exists()
-        else data_dir / "validation"
-        if (data_dir / "validation").exists()
-        else None
+        data_dir / "val" if (data_dir / "val").exists() else data_dir / "validation" if (data_dir / "validation").exists() else None
     )  # data/test or data/val
     test_set = data_dir / "test" if (data_dir / "test").exists() else None  # data/val or data/test
     if split == "val" and not val_set:
@@ -482,9 +577,7 @@ class HUBDatasetStats:
         if not str(path).endswith(".zip"):  # path is data.yaml
             return False, None, path
         unzip_dir = unzip_file(path, path=path.parent)
-        assert unzip_dir.is_dir(), (
-            f"Error unzipping {path}, {unzip_dir} not found. " f"path/to/abc.zip MUST unzip to path/to/abc/"
-        )
+        assert unzip_dir.is_dir(), f"Error unzipping {path}, {unzip_dir} not found. " f"path/to/abc.zip MUST unzip to path/to/abc/"
         return True, str(unzip_dir), find_dataset_yaml(unzip_dir)  # zipped, data_dir, yaml_path
 
     def _hub_ops(self, f):

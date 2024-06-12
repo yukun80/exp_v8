@@ -1,4 +1,4 @@
-path: /home/yukun/codes/ultralytics-main/datastes/CAS_yolo_dataset
+path: /home/yukun/codes/ultralytics-main/datastes/yolo_dataset_sub
 train: images/train
 val: images/val
 test: images/test

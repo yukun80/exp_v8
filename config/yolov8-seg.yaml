@@ -10,6 +10,10 @@ scales: # model compound scaling constants, i.e. 'model=yolov8n-seg.yaml' will c
   m: [0.67, 0.75, 768]
   l: [1.00, 1.00, 512]
   x: [1.00, 1.25, 512]
+# depth_multiple: 0.33  # model depth multiple 控制模型的深度，仅在repeats>1时有效
+# width_multiple: 0.25  # model width multiple 控制模型的宽度，主要作用于args中的ch_out参数（第一个）
+# 如第一个Conv层，ch_out=64，那么在v8n实际运算过程中，会将卷积过程中的卷积核设为64x0.25，所以会输出16通道的特征图。
+# 第三层重复三次，实际次数乘depth，n=3*d=3*0.33=1，所以实际上只会重复一次，即yolov8n只有一次C3f操作。
 
 # YOLOv8.0n backbone
 backbone:

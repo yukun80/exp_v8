@@ -47,6 +47,7 @@ from .block import (
     ResNetLayer,
     Silence,
 )
+
 from .conv import (
     CBAM,
     ChannelAttention,
@@ -62,7 +63,15 @@ from .conv import (
     RepConv,
     SpatialAttention,
 )
-from .head import OBB, Classify, Detect, Pose, RTDETRDecoder, Segment, WorldDetect
+from .head import (
+    Segment,
+    Detect,
+    OBB,
+    Classify,
+    Pose,
+    RTDETRDecoder,
+    WorldDetect,
+)
 from .transformer import (
     AIFI,
     MLP,

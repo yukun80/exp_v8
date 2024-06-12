@@ -346,7 +346,7 @@ def clip_coords(coords, shape):
 
 def scale_image(masks, im0_shape, ratio_pad=None):
     """
-    Takes a mask, and resizes it to the original image size.
+    选取一个蒙版，并将其调整为原始图像大小。
 
     Args:
         masks (np.ndarray): resized and padded masks/images, [h, w, num]/[h, w, 3].
@@ -800,7 +800,7 @@ def regularize_rboxes(rboxes):
 
 def masks2segments(masks, strategy="largest"):
     """
-    It takes a list of masks(n,h,w) and returns a list of segments(n,xy)
+    它接受一个掩码列表(n,h,w)并返回一个段列表(n,xy)
 
     Args:
         masks (torch.Tensor): the output of the model, which is a tensor of shape (batch_size, 160, 160)
