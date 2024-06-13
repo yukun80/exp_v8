@@ -1,7 +1,11 @@
 import torch
 import torch.nn as nn
 from ..modules.conv import Conv
+from ..modules.block import C2f
 from .attention import SEAttention
+from .mamba_vss import VSSBlock
+
+__all__ = ["ContextGuideFusionModule", "C2f_LVMB"]
 
 
 class ContextGuideFusionModule(nn.Module):
@@ -28,3 +32,9 @@ class ContextGuideFusionModule(nn.Module):
         x0_weight = x0 * x0_weight
         x1_weight = x1 * x1_weight
         return torch.cat([x0 + x1_weight, x1 + x0_weight], dim=1)
+
+
+class C2f_LVMB(C2f):
+    def __init__(self, c1, c2, n=1, shortcut=False, g=1, e=0.5):
+        super().__init__(c1, c2, n, shortcut, g, e)
+        self.m = nn.ModuleList(VSSBlock(self.c) for _ in range(n))

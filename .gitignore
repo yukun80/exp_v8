@@ -40,6 +40,9 @@ MANIFEST
 *.tiff
 *.cache
 *.txt
+*.cu
+*.cuh
+
 
 # 路径
 fastsam_output/

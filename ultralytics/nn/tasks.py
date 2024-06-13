@@ -7,7 +7,7 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from ultralytics.nn.FYK_modules import ContextGuideFusionModule
+from ultralytics.nn.FYK_modules import *
 from ultralytics.nn.modules import (
     AIFI,
     C1,
@@ -301,6 +301,7 @@ class BaseModel(nn.Module):
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, self.state_dict())  # intersect
         self.load_state_dict(csd, strict=False)  # load
+        # verbose参数是一个控制训练过程中输出信息的选项
         if verbose:
             LOGGER.info(
                 f"Transferred {len(csd)}/{len(self.model.state_dict())} items from pretrained weights"
@@ -426,18 +427,6 @@ class DetectionModel(BaseModel):
         return v8DetectionLoss(self)
 
 
-class OBBModel(DetectionModel):
-    """YOLOv8 Oriented Bounding Box (OBB) model."""
-
-    def __init__(self, cfg="yolov8n-obb.yaml", ch=3, nc=None, verbose=True):
-        """Initialize YOLOv8 OBB model with given config and parameters."""
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
-
-    def init_criterion(self):
-        """Initialize the loss criterion for the model."""
-        return v8OBBLoss(self)
-
-
 class SegmentationModel(DetectionModel):
     """YOLOv8 segmentation model."""
 
@@ -448,367 +437,6 @@ class SegmentationModel(DetectionModel):
     def init_criterion(self):
         """Initialize the loss criterion for the SegmentationModel."""
         return v8SegmentationLoss(self)
-
-
-class PoseModel(DetectionModel):
-    """YOLOv8 pose model."""
-
-    def __init__(
-        self,
-        cfg="yolov8n-pose.yaml",
-        ch=3,
-        nc=None,
-        data_kpt_shape=(None, None),
-        verbose=True,
-    ):
-        """Initialize YOLOv8 Pose model."""
-        if not isinstance(cfg, dict):
-            cfg = yaml_model_load(cfg)  # load model YAML
-        if any(data_kpt_shape) and list(data_kpt_shape) != list(
-            cfg["kpt_shape"]
-        ):
-            LOGGER.info(
-                f"Overriding model.yaml kpt_shape={cfg['kpt_shape']} with kpt_shape={data_kpt_shape}"
-            )
-            cfg["kpt_shape"] = data_kpt_shape
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
-
-    def init_criterion(self):
-        """Initialize the loss criterion for the PoseModel."""
-        return v8PoseLoss(self)
-
-
-class ClassificationModel(BaseModel):
-    """YOLOv8 classification model."""
-
-    def __init__(self, cfg="yolov8n-cls.yaml", ch=3, nc=None, verbose=True):
-        """Init ClassificationModel with YAML, channels, number of classes, verbose flag."""
-        super().__init__()
-        self._from_yaml(cfg, ch, nc, verbose)
-
-    def _from_yaml(self, cfg, ch, nc, verbose):
-        """Set YOLOv8 model configurations and define the model architecture."""
-        self.yaml = (
-            cfg if isinstance(cfg, dict) else yaml_model_load(cfg)
-        )  # cfg dict
-
-        # Define model
-        ch = self.yaml["ch"] = self.yaml.get("ch", ch)  # input channels
-        if nc and nc != self.yaml["nc"]:
-            LOGGER.info(
-                f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}"
-            )
-            self.yaml["nc"] = nc  # override YAML value
-        elif not nc and not self.yaml.get("nc", None):
-            raise ValueError(
-                "nc not specified. Must specify nc in model.yaml or function arguments."
-            )
-        self.model, self.save = parse_model(
-            deepcopy(self.yaml), ch=ch, verbose=verbose
-        )  # model, savelist
-        self.stride = torch.Tensor([1])  # no stride constraints
-        self.names = {
-            i: f"{i}" for i in range(self.yaml["nc"])
-        }  # default names dict
-        self.info()
-
-    @staticmethod
-    def reshape_outputs(model, nc):
-        """Update a TorchVision classification model to class count 'n' if required."""
-        name, m = list(
-            (model.model if hasattr(model, "model") else model).named_children()
-        )[
-            -1
-        ]  # last module
-        if isinstance(m, Classify):  # YOLO Classify() head
-            if m.linear.out_features != nc:
-                m.linear = nn.Linear(m.linear.in_features, nc)
-        elif isinstance(m, nn.Linear):  # ResNet, EfficientNet
-            if m.out_features != nc:
-                setattr(model, name, nn.Linear(m.in_features, nc))
-        elif isinstance(m, nn.Sequential):
-            types = [type(x) for x in m]
-            if nn.Linear in types:
-                i = types.index(nn.Linear)  # nn.Linear index
-                if m[i].out_features != nc:
-                    m[i] = nn.Linear(m[i].in_features, nc)
-            elif nn.Conv2d in types:
-                i = types.index(nn.Conv2d)  # nn.Conv2d index
-                if m[i].out_channels != nc:
-                    m[i] = nn.Conv2d(
-                        m[i].in_channels,
-                        nc,
-                        m[i].kernel_size,
-                        m[i].stride,
-                        bias=m[i].bias is not None,
-                    )
-
-    def init_criterion(self):
-        """Initialize the loss criterion for the ClassificationModel."""
-        return v8ClassificationLoss()
-
-
-class RTDETRDetectionModel(DetectionModel):
-    """
-    RTDETR (Real-time DEtection and Tracking using Transformers) Detection Model class.
-
-    This class is responsible for constructing the RTDETR architecture, defining loss functions, and facilitating both
-    the training and inference processes. RTDETR is an object detection and tracking model that extends from the
-    DetectionModel base class.
-
-    Attributes:
-        cfg (str): The configuration file path or preset string. Default is 'rtdetr-l.yaml'.
-        ch (int): Number of input channels. Default is 3 (RGB).
-        nc (int, optional): Number of classes for object detection. Default is None.
-        verbose (bool): Specifies if summary statistics are shown during initialization. Default is True.
-
-    Methods:
-        init_criterion: Initializes the criterion used for loss calculation.
-        loss: Computes and returns the loss during training.
-        predict: Performs a forward pass through the network and returns the output.
-    """
-
-    def __init__(self, cfg="rtdetr-l.yaml", ch=3, nc=None, verbose=True):
-        """
-        Initialize the RTDETRDetectionModel.
-
-        Args:
-            cfg (str): Configuration file name or path.
-            ch (int): Number of input channels.
-            nc (int, optional): Number of classes. Defaults to None.
-            verbose (bool, optional): Print additional information during initialization. Defaults to True.
-        """
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
-
-    def init_criterion(self):
-        """Initialize the loss criterion for the RTDETRDetectionModel."""
-        from ultralytics.models.utils.loss import RTDETRDetectionLoss
-
-        return RTDETRDetectionLoss(nc=self.nc, use_vfl=True)
-
-    def loss(self, batch, preds=None):
-        """
-        Compute the loss for the given batch of data.
-
-        Args:
-            batch (dict): Dictionary containing image and label data.
-            preds (torch.Tensor, optional): Precomputed model predictions. Defaults to None.
-
-        Returns:
-            (tuple): A tuple containing the total loss and main three losses in a tensor.
-        """
-        if not hasattr(self, "criterion"):
-            self.criterion = self.init_criterion()
-
-        img = batch["img"]
-        # NOTE: preprocess gt_bbox and gt_labels to list.
-        bs = len(img)
-        batch_idx = batch["batch_idx"]
-        gt_groups = [(batch_idx == i).sum().item() for i in range(bs)]
-        targets = {
-            "cls": batch["cls"].to(img.device, dtype=torch.long).view(-1),
-            "bboxes": batch["bboxes"].to(device=img.device),
-            "batch_idx": batch_idx.to(img.device, dtype=torch.long).view(-1),
-            "gt_groups": gt_groups,
-        }
-
-        preds = self.predict(img, batch=targets) if preds is None else preds
-        dec_bboxes, dec_scores, enc_bboxes, enc_scores, dn_meta = (
-            preds if self.training else preds[1]
-        )
-        if dn_meta is None:
-            dn_bboxes, dn_scores = None, None
-        else:
-            dn_bboxes, dec_bboxes = torch.split(
-                dec_bboxes, dn_meta["dn_num_split"], dim=2
-            )
-            dn_scores, dec_scores = torch.split(
-                dec_scores, dn_meta["dn_num_split"], dim=2
-            )
-
-        dec_bboxes = torch.cat(
-            [enc_bboxes.unsqueeze(0), dec_bboxes]
-        )  # (7, bs, 300, 4)
-        dec_scores = torch.cat([enc_scores.unsqueeze(0), dec_scores])
-
-        loss = self.criterion(
-            (dec_bboxes, dec_scores),
-            targets,
-            dn_bboxes=dn_bboxes,
-            dn_scores=dn_scores,
-            dn_meta=dn_meta,
-        )
-        # NOTE: There are like 12 losses in RTDETR, backward with all losses but only show the main three losses.
-        return sum(loss.values()), torch.as_tensor(
-            [
-                loss[k].detach()
-                for k in ["loss_giou", "loss_class", "loss_bbox"]
-            ],
-            device=img.device,
-        )
-
-    def predict(
-        self,
-        x,
-        profile=False,
-        visualize=False,
-        batch=None,
-        augment=False,
-        embed=None,
-    ):
-        """
-        Perform a forward pass through the model.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-            profile (bool, optional): If True, profile the computation time for each layer. Defaults to False.
-            visualize (bool, optional): If True, save feature maps for visualization. Defaults to False.
-            batch (dict, optional): Ground truth data for evaluation. Defaults to None.
-            augment (bool, optional): If True, perform data augmentation during inference. Defaults to False.
-            embed (list, optional): A list of feature vectors/embeddings to return.
-
-        Returns:
-            (torch.Tensor): Model's output tensor.
-        """
-        y, dt, embeddings = [], [], []  # outputs
-        for m in self.model[:-1]:  # except the head part
-            if m.f != -1:  # if not from previous layer
-                x = (
-                    y[m.f]
-                    if isinstance(m.f, int)
-                    else [x if j == -1 else y[j] for j in m.f]
-                )  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            x = m(x)  # run
-            y.append(x if m.i in self.save else None)  # save output
-            if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
-            if embed and m.i in embed:
-                embeddings.append(
-                    nn.functional.adaptive_avg_pool2d(x, (1, 1))
-                    .squeeze(-1)
-                    .squeeze(-1)
-                )  # flatten
-                if m.i == max(embed):
-                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
-        head = self.model[-1]
-        x = head([y[j] for j in head.f], batch)  # head inference
-        return x
-
-
-class WorldModel(DetectionModel):
-    """YOLOv8 World Model."""
-
-    def __init__(self, cfg="yolov8s-world.yaml", ch=3, nc=None, verbose=True):
-        """Initialize YOLOv8 world model with given config and parameters."""
-        self.txt_feats = torch.randn(1, nc or 80, 512)  # features placeholder
-        self.clip_model = None  # CLIP model placeholder
-        super().__init__(cfg=cfg, ch=ch, nc=nc, verbose=verbose)
-
-    def set_classes(self, text, batch=80, cache_clip_model=True):
-        """Set classes in advance so that model could do offline-inference without clip model."""
-        try:
-            import clip
-        except ImportError:
-            check_requirements("git+https://github.com/ultralytics/CLIP.git")
-            import clip
-
-        if (
-            not getattr(self, "clip_model", None) and cache_clip_model
-        ):  # for backwards compatibility of models lacking clip_model attribute
-            self.clip_model = clip.load("ViT-B/32")[0]
-        model = (
-            self.clip_model if cache_clip_model else clip.load("ViT-B/32")[0]
-        )
-        device = next(model.parameters()).device
-        text_token = clip.tokenize(text).to(device)
-        txt_feats = [
-            model.encode_text(token).detach()
-            for token in text_token.split(batch)
-        ]
-        txt_feats = (
-            txt_feats[0] if len(txt_feats) == 1 else torch.cat(txt_feats, dim=0)
-        )
-        txt_feats = txt_feats / txt_feats.norm(p=2, dim=-1, keepdim=True)
-        self.txt_feats = txt_feats.reshape(-1, len(text), txt_feats.shape[-1])
-        self.model[-1].nc = len(text)
-
-    def predict(
-        self,
-        x,
-        profile=False,
-        visualize=False,
-        txt_feats=None,
-        augment=False,
-        embed=None,
-    ):
-        """
-        Perform a forward pass through the model.
-
-        Args:
-            x (torch.Tensor): The input tensor.
-            profile (bool, optional): If True, profile the computation time for each layer. Defaults to False.
-            visualize (bool, optional): If True, save feature maps for visualization. Defaults to False.
-            txt_feats (torch.Tensor): The text features, use it if it's given. Defaults to None.
-            augment (bool, optional): If True, perform data augmentation during inference. Defaults to False.
-            embed (list, optional): A list of feature vectors/embeddings to return.
-
-        Returns:
-            (torch.Tensor): Model's output tensor.
-        """
-        txt_feats = (self.txt_feats if txt_feats is None else txt_feats).to(
-            device=x.device, dtype=x.dtype
-        )
-        if len(txt_feats) != len(x):
-            txt_feats = txt_feats.repeat(len(x), 1, 1)
-        ori_txt_feats = txt_feats.clone()
-        y, dt, embeddings = [], [], []  # outputs
-        for m in self.model:  # except the head part
-            if m.f != -1:  # if not from previous layer
-                x = (
-                    y[m.f]
-                    if isinstance(m.f, int)
-                    else [x if j == -1 else y[j] for j in m.f]
-                )  # from earlier layers
-            if profile:
-                self._profile_one_layer(m, x, dt)
-            if isinstance(m, C2fAttn):
-                x = m(x, txt_feats)
-            elif isinstance(m, WorldDetect):
-                x = m(x, ori_txt_feats)
-            elif isinstance(m, ImagePoolingAttn):
-                txt_feats = m(x, txt_feats)
-            else:
-                x = m(x)  # run
-
-            y.append(x if m.i in self.save else None)  # save output
-            if visualize:
-                feature_visualization(x, m.type, m.i, save_dir=visualize)
-            if embed and m.i in embed:
-                embeddings.append(
-                    nn.functional.adaptive_avg_pool2d(x, (1, 1))
-                    .squeeze(-1)
-                    .squeeze(-1)
-                )  # flatten
-                if m.i == max(embed):
-                    return torch.unbind(torch.cat(embeddings, 1), dim=0)
-        return x
-
-    def loss(self, batch, preds=None):
-        """
-        Compute loss.
-
-        Args:
-            batch (dict): Batch to compute loss on.
-            preds (torch.Tensor | List[torch.Tensor]): Predictions.
-        """
-        if not hasattr(self, "criterion"):
-            self.criterion = self.init_criterion()
-
-        if preds is None:
-            preds = self.forward(batch["img"], txt_feats=batch["txt_feats"])
-        return self.criterion(preds, batch)
 
 
 class Ensemble(nn.ModuleList):
@@ -1026,6 +654,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
 
     # Args
     max_channels = float("inf")
+    # 模型的配置以字典的形式传入，分别获取类别数，缩放模块重复次数，缩放模型通道数，以及模型的激活函数。
     nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
     depth, width, kpt_shape = (
         d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape")
@@ -1040,9 +669,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         depth, width, max_channels = scales[scale]
 
     if act:
-        Conv.default_act = eval(
-            act
-        )  # redefine default activation, i.e. Conv.default_act = nn.SiLU()
+        # 修改模型的激活函数 # redefine default activation, i.e. Conv.default_act = nn.SiLU()
+        Conv.default_act = eval(act)
         if verbose:
             LOGGER.info(f"{colorstr('activation:')} {act}")  # print
 
@@ -1050,21 +678,28 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         LOGGER.info(
             f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}"
         )
-    ch = [ch]
+    ch = [ch]  # ch 存储每个layer的输入通道数 input channels
+
+    # layers将每个layer存储进列表，save存储当前layer用到前面layer的index，c2每个layer的输出通道数
     layers, save, c2 = [], [], ch[-1]  # layers, savelist, ch out
-    for i, (f, n, m, args) in enumerate(
-        d["backbone"] + d["head"]
-    ):  # from, number, module, args
-        m = (
-            getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]
-        )  # get module
+
+    # 遍历backbone和head组成的列表生成网络 # from, number, module, args
+    for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):
+        # get module
+        m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]
+        # 遍历layer的参数，将其中的字符串元素转换为 Python 对象。
+        # 这是通过使用 ast.literal_eval() 函数来实现的，该函数可以安全地解析并执行一个字符串形式的 Python 表达式。
         for j, a in enumerate(args):
             if isinstance(a, str):
                 with contextlib.suppress(ValueError):
                     args[j] = (
-                        locals()[a] if a in locals() else ast.literal_eval(a)
+                        # 这个函数可以将字符串形式的 Python 表达式（如 '1'，'[1, 2, 3]'，'{"key": "value"}' 等）
+                        # 转换为对应的 Python 对象（如 1，[1, 2, 3]，{"key": "value"} 等）。
+                        locals()[a]
+                        if a in locals()
+                        else ast.literal_eval(a)
                     )
-
+        # 如果重复次数大于1则缩放模块重复次数，并且重复次数最小为1；如果重复系数为1，不操作
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in {
             Classify,
@@ -1092,12 +727,15 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             DWConvTranspose2d,
             C3x,
             RepC3,
+            C2f_LVMB,
         }:
-            c1, c2 = ch[f], args[0]
-            if (
-                c2 != nc
-            ):  # if c2 not equal to number of classes (i.e. for Classify() output)
+            # c1为layer的输入通道数，c2为layer的输出通道数
+            c1, c2 = (ch[f], args[0])
+            # if c2 not equal to number of classes (i.e. for Classify() output)
+            # 如果是类别数则不进行缩放；如果不是，则进行缩放
+            if c2 != nc:
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
+            # 如果是C2fAttn模块，则对输入通道数和输出通道数进行缩放
             if m is C2fAttn:
                 args[1] = make_divisible(
                     min(args[1], max_channels // 2) * width, 8
@@ -1108,6 +746,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                     else args[2]
                 )  # num heads
 
+            # 将layer需要的所有参数组成一个列表，将在后面将列表作为layer的参数传出layer
             args = [c1, c2, *args[1:]]
             if m in {
                 BottleneckCSP,
@@ -1120,6 +759,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 C3Ghost,
                 C3x,
                 RepC3,
+                C2f_LVMB,
             }:
                 args.insert(2, n)  # number of repeats
                 n = 1
@@ -1136,15 +776,12 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif m is nn.BatchNorm2d:
             args = [ch[f]]
         elif m is Concat:
+            # Concat操作的输出通道数为输入通道数之和
             c2 = sum(ch[x] for x in f)
         elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn}:
             args.append([ch[x] for x in f])
             if m is Segment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
-        elif (
-            m is RTDETRDecoder
-        ):  # special case, channels arg must be passed in index 1
-            args.insert(1, [ch[x] for x in f])
         elif m is CBLinear:
             c2 = args[0]
             c1 = ch[f]
@@ -1159,19 +796,23 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         else:
             c2 = ch[f]
 
-        m_ = (
-            nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)
-        )  # module
+        # 如果重复次数大于1，则将重复的操作组成一个Sequential
+        m_ = nn.Sequential(*(m(*args) for _ in range(n))) if n > 1 else m(*args)
+        # 获取模块的类型（class），如models.commom.Conv
         t = str(m)[8:-2].replace("__main__.", "")  # module type
+        # 获取模块的参数量
         m.np = sum(x.numel() for x in m_.parameters())  # number params
+        # m_.i：当前layer的索引， m_.f：当前layer的输入来自于那些layer的索引，m_.type：当前layer的类型
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         if verbose:
             LOGGER.info(
                 f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<45}{str(args):<30}"
             )  # print
+        # 将当前layer用到的前面layer的index进行存储
         save.extend(
             x % i for x in ([f] if isinstance(f, int) else f) if x != -1
         )  # append to savelist
+        # 将当前layer加入layers
         layers.append(m_)
         if i == 0:
             ch = []

@@ -11,7 +11,7 @@ if __name__ == "__main__":
     if ultralytics_path not in sys.path:
         sys.path.append(ultralytics_path)
 
-    model = YOLO(model="config/yolov8x-seg-ContextGuideFPN.yaml")
+    model = YOLO(model="config/yolov8x-C2f-LVMB.yaml")
     model.train(
         # 233333
         data="datastes/yolo_dataset_sub/yolo_sub.yaml",
