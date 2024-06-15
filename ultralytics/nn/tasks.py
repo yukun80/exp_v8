@@ -7,7 +7,14 @@ from pathlib import Path
 import torch
 import torch.nn as nn
 
-from ultralytics.nn.FYK_modules import *
+from ultralytics.nn.FYK_modules import (
+    ContextGuideFusionModule,
+    C2f_LVMB,
+    SimpleStem,
+    VisionClueMerge,
+    VSSBlock,
+    XSSBlock,
+)
 from ultralytics.nn.modules import (
     AIFI,
     C1,
@@ -104,15 +111,11 @@ class BaseModel(nn.Module):
         Returns:
             (torch.Tensor): The output of the network.
         """
-        if isinstance(
-            x, dict
-        ):  # for cases of training and validating while training.
+        if isinstance(x, dict):  # for cases of training and validating while training.
             return self.loss(x, *args, **kwargs)
         return self.predict(x, *args, **kwargs)
 
-    def predict(
-        self, x, profile=False, visualize=False, augment=False, embed=None
-    ):
+    def predict(self, x, profile=False, visualize=False, augment=False, embed=None):
         """
         Perform a forward pass through the network.
 
@@ -146,11 +149,7 @@ class BaseModel(nn.Module):
         y, dt, embeddings = [], [], []  # outputs
         for m in self.model:
             if m.f != -1:  # if not from previous layer
-                x = (
-                    y[m.f]
-                    if isinstance(m.f, int)
-                    else [x if j == -1 else y[j] for j in m.f]
-                )  # from earlier layers
+                x = y[m.f] if isinstance(m.f, int) else [x if j == -1 else y[j] for j in m.f]  # from earlier layers
             if profile:
                 self._profile_one_layer(m, x, dt)
             x = m(x)  # run
@@ -158,11 +157,7 @@ class BaseModel(nn.Module):
             if visualize:
                 feature_visualization(x, m.type, m.i, save_dir=visualize)
             if embed and m.i in embed:
-                embeddings.append(
-                    nn.functional.adaptive_avg_pool2d(x, (1, 1))
-                    .squeeze(-1)
-                    .squeeze(-1)
-                )  # flatten
+                embeddings.append(nn.functional.adaptive_avg_pool2d(x, (1, 1)).squeeze(-1).squeeze(-1))  # flatten
                 if m.i == max(embed):
                     return torch.unbind(torch.cat(embeddings, 1), dim=0)
         return x
@@ -188,24 +183,14 @@ class BaseModel(nn.Module):
         Returns:
             None
         """
-        c = m == self.model[-1] and isinstance(
-            x, list
-        )  # is final layer list, copy input as inplace fix
-        flops = (
-            thop.profile(m, inputs=[x.copy() if c else x], verbose=False)[0]
-            / 1e9
-            * 2
-            if thop
-            else 0
-        )  # FLOPs
+        c = m == self.model[-1] and isinstance(x, list)  # is final layer list, copy input as inplace fix
+        flops = thop.profile(m, inputs=[x.copy() if c else x], verbose=False)[0] / 1e9 * 2 if thop else 0  # FLOPs
         t = time_sync()
         for _ in range(10):
             m(x.copy() if c else x)
         dt.append((time_sync() - t) * 100)
         if m == self.model[0]:
-            LOGGER.info(
-                f"{'time (ms)':>10s} {'GFLOPs':>10s} {'params':>10s}  module"
-            )
+            LOGGER.info(f"{'time (ms)':>10s} {'GFLOPs':>10s} {'params':>10s}  module")
         LOGGER.info(f"{dt[-1]:10.2f} {flops:10.2f} {m.np:10.0f}  {m.type}")
         if c:
             LOGGER.info(f"{sum(dt):10.2f} {'-':>10s} {'-':>10s}  Total")
@@ -227,9 +212,7 @@ class BaseModel(nn.Module):
                     delattr(m, "bn")  # remove batchnorm
                     m.forward = m.forward_fuse  # update forward
                 if isinstance(m, ConvTranspose) and hasattr(m, "bn"):
-                    m.conv_transpose = fuse_deconv_and_bn(
-                        m.conv_transpose, m.bn
-                    )
+                    m.conv_transpose = fuse_deconv_and_bn(m.conv_transpose, m.bn)
                     delattr(m, "bn")  # remove batchnorm
                     m.forward = m.forward_fuse  # update forward
                 if isinstance(m, RepConv):
@@ -249,12 +232,8 @@ class BaseModel(nn.Module):
         Returns:
             (bool): True if the number of BatchNorm layers in the model is less than the threshold, False otherwise.
         """
-        bn = tuple(
-            v for k, v in nn.__dict__.items() if "Norm" in k
-        )  # normalization layers, i.e. BatchNorm2d()
-        return (
-            sum(isinstance(v, bn) for v in self.modules()) < thresh
-        )  # True if < 'thresh' BatchNorm layers in model
+        bn = tuple(v for k, v in nn.__dict__.items() if "Norm" in k)  # normalization layers, i.e. BatchNorm2d()
+        return sum(isinstance(v, bn) for v in self.modules()) < thresh  # True if < 'thresh' BatchNorm layers in model
 
     def info(self, detailed=False, verbose=True, imgsz=640):
         """
@@ -279,9 +258,7 @@ class BaseModel(nn.Module):
         """
         self = super()._apply(fn)
         m = self.model[-1]  # Detect()
-        if isinstance(
-            m, Detect
-        ):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
+        if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
             m.stride = fn(m.stride)
             m.anchors = fn(m.anchors)
             m.strides = fn(m.strides)
@@ -295,17 +272,13 @@ class BaseModel(nn.Module):
             weights (dict | torch.nn.Module): The pre-trained weights to be loaded.
             verbose (bool, optional): Whether to log the transfer progress. Defaults to True.
         """
-        model = (
-            weights["model"] if isinstance(weights, dict) else weights
-        )  # torchvision models are not dicts
+        model = weights["model"] if isinstance(weights, dict) else weights  # torchvision models are not dicts
         csd = model.float().state_dict()  # checkpoint state_dict as FP32
         csd = intersect_dicts(csd, self.state_dict())  # intersect
         self.load_state_dict(csd, strict=False)  # load
         # verbose参数是一个控制训练过程中输出信息的选项
         if verbose:
-            LOGGER.info(
-                f"Transferred {len(csd)}/{len(self.model.state_dict())} items from pretrained weights"
-            )
+            LOGGER.info(f"Transferred {len(csd)}/{len(self.model.state_dict())} items from pretrained weights")
 
     def loss(self, batch, preds=None):
         """
@@ -323,53 +296,48 @@ class BaseModel(nn.Module):
 
     def init_criterion(self):
         """Initialize the loss criterion for the BaseModel."""
-        raise NotImplementedError(
-            "compute_loss() needs to be implemented by task heads"
-        )
+        raise NotImplementedError("compute_loss() needs to be implemented by task heads")
 
 
 class DetectionModel(BaseModel):
     """YOLOv8 detection model."""
 
-    def __init__(
-        self, cfg="yolov8n.yaml", ch=3, nc=None, verbose=True
-    ):  # model, input channels, number of classes
+    def __init__(self, cfg="yolov8n.yaml", ch=3, nc=None, verbose=True):  # model, input channels, number of classes
         """Initialize the YOLOv8 detection model with the given config and parameters."""
         super().__init__()
-        self.yaml = (
-            cfg if isinstance(cfg, dict) else yaml_model_load(cfg)
-        )  # cfg dict
+        self.yaml = cfg if isinstance(cfg, dict) else yaml_model_load(cfg)  # cfg dict
 
         # Define model
         ch = self.yaml["ch"] = self.yaml.get("ch", ch)  # input channels
         if nc and nc != self.yaml["nc"]:
-            LOGGER.info(
-                f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}"
-            )
+            LOGGER.info(f"Overriding model.yaml nc={self.yaml['nc']} with nc={nc}")
             self.yaml["nc"] = nc  # override YAML value
-        self.model, self.save = parse_model(
-            deepcopy(self.yaml), ch=ch, verbose=verbose
-        )  # model, savelist
-        self.names = {
-            i: f"{i}" for i in range(self.yaml["nc"])
-        }  # default names dict
+        self.model, self.save = parse_model(deepcopy(self.yaml), ch=ch, verbose=verbose)  # model, savelist
+        self.names = {i: f"{i}" for i in range(self.yaml["nc"])}  # default names dict
         self.inplace = self.yaml.get("inplace", True)
 
         # Build strides
         m = self.model[-1]  # Detect()
-        if isinstance(
-            m, Detect
-        ):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
+        if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
             s = 256  # 2x min stride
             m.inplace = self.inplace
-            forward = lambda x: (
-                self.forward(x)[0]
-                if isinstance(m, (Segment, Pose, OBB))
-                else self.forward(x)
-            )
-            m.stride = torch.tensor(
-                [s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))]
-            )  # forward
+            forward = lambda x: (self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB)) else self.forward(x))
+            try:
+                m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
+            except Exception as e:
+                if (
+                    "Not implemented on the CPU" in str(e)
+                    or "Input type (torch.FloatTensor) and weight type (torch.cuda.FloatTensor)" in str(e)
+                    or "CUDA tensor" in str(e)
+                    or "is_cuda()" in str(e)
+                    or "Cannot find backend for cpu" in str(e)
+                ):
+                    self.model.to(torch.device("cuda"))
+                    m.stride = torch.tensor(
+                        [s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s).to(torch.device("cuda")))]
+                    )  # forward
+                else:
+                    raise e
             self.stride = m.stride
             m.bias_init()  # only run once
         else:
@@ -389,9 +357,7 @@ class DetectionModel(BaseModel):
         f = [None, 3, None]  # flips (2-ud, 3-lr)
         y = []  # outputs
         for si, fi in zip(s, f):
-            xi = scale_img(
-                x.flip(fi) if fi else x, si, gs=int(self.stride.max())
-            )
+            xi = scale_img(x.flip(fi) if fi else x, si, gs=int(self.stride.max()))
             yi = super().predict(xi)[0]  # forward
             yi = self._descale_pred(yi, fi, si, img_size)
             y.append(yi)
@@ -416,9 +382,7 @@ class DetectionModel(BaseModel):
         e = 1  # exclude layer count
         i = (y[0].shape[-1] // g) * sum(4**x for x in range(e))  # indices
         y[0] = y[0][..., :-i]  # large
-        i = (y[-1].shape[-1] // g) * sum(
-            4 ** (nl - 1 - x) for x in range(e)
-        )  # indices
+        i = (y[-1].shape[-1] // g) * sum(4 ** (nl - 1 - x) for x in range(e))  # indices
         y[-1] = y[-1][..., i:]  # small
         return y
 
@@ -563,14 +527,8 @@ def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
     ensemble = Ensemble()
     for w in weights if isinstance(weights, list) else [weights]:
         ckpt, w = torch_safe_load(w)  # load ckpt
-        args = (
-            {**DEFAULT_CFG_DICT, **ckpt["train_args"]}
-            if "train_args" in ckpt
-            else None
-        )  # combined args
-        model = (
-            (ckpt.get("ema") or ckpt["model"]).to(device).float()
-        )  # FP32 model
+        args = {**DEFAULT_CFG_DICT, **ckpt["train_args"]} if "train_args" in ckpt else None  # combined args
+        model = (ckpt.get("ema") or ckpt["model"]).to(device).float()  # FP32 model
 
         # Model compatibility updates
         model.args = args  # attach args to model
@@ -580,19 +538,13 @@ def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
             model.stride = torch.tensor([32.0])
 
         # Append
-        ensemble.append(
-            model.fuse().eval()
-            if fuse and hasattr(model, "fuse")
-            else model.eval()
-        )  # model in eval mode
+        ensemble.append(model.fuse().eval() if fuse and hasattr(model, "fuse") else model.eval())  # model in eval mode
 
     # Module updates
     for m in ensemble.modules():
         if hasattr(m, "inplace"):
             m.inplace = inplace
-        elif isinstance(m, nn.Upsample) and not hasattr(
-            m, "recompute_scale_factor"
-        ):
+        elif isinstance(m, nn.Upsample) and not hasattr(m, "recompute_scale_factor"):
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility
 
     # Return model
@@ -603,12 +555,8 @@ def attempt_load_weights(weights, device=None, inplace=True, fuse=False):
     LOGGER.info(f"Ensemble created with {weights}\n")
     for k in "names", "nc", "yaml":
         setattr(ensemble, k, getattr(ensemble[0], k))
-    ensemble.stride = ensemble[
-        int(torch.argmax(torch.tensor([m.stride.max() for m in ensemble])))
-    ].stride
-    assert all(
-        ensemble[0].nc == m.nc for m in ensemble
-    ), f"Models differ in class counts {[m.nc for m in ensemble]}"
+    ensemble.stride = ensemble[int(torch.argmax(torch.tensor([m.stride.max() for m in ensemble])))].stride
+    assert all(ensemble[0].nc == m.nc for m in ensemble), f"Models differ in class counts {[m.nc for m in ensemble]}"
     return ensemble
 
 
@@ -622,25 +570,19 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
     model = (ckpt.get("ema") or ckpt["model"]).to(device).float()  # FP32 model
 
     # Model compatibility updates
-    model.args = {
-        k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS
-    }  # attach args to model
+    model.args = {k: v for k, v in args.items() if k in DEFAULT_CFG_KEYS}  # attach args to model
     model.pt_path = weight  # attach *.pt file path to model
     model.task = guess_model_task(model)
     if not hasattr(model, "stride"):
         model.stride = torch.tensor([32.0])
 
-    model = (
-        model.fuse().eval() if fuse and hasattr(model, "fuse") else model.eval()
-    )  # model in eval mode
+    model = model.fuse().eval() if fuse and hasattr(model, "fuse") else model.eval()  # model in eval mode
 
     # Module updates 如果 fuse 为 True 且模型具有 fuse 方法，则融合模型并将其设置为评估模式；否则，仅将模型设置为评估模式。
     for m in model.modules():
         if hasattr(m, "inplace"):
             m.inplace = inplace
-        elif isinstance(m, nn.Upsample) and not hasattr(
-            m, "recompute_scale_factor"
-        ):
+        elif isinstance(m, nn.Upsample) and not hasattr(m, "recompute_scale_factor"):
             m.recompute_scale_factor = None  # torch 1.11.0 compatibility
 
     # Return model and ckpt
@@ -656,16 +598,12 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
     max_channels = float("inf")
     # 模型的配置以字典的形式传入，分别获取类别数，缩放模块重复次数，缩放模型通道数，以及模型的激活函数。
     nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
-    depth, width, kpt_shape = (
-        d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape")
-    )
+    depth, width, kpt_shape = (d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape"))
     if scales:
         scale = d.get("scale")
         if not scale:
             scale = tuple(scales.keys())[0]
-            LOGGER.warning(
-                f"WARNING ⚠️ no model scale passed. Assuming scale='{scale}'."
-            )
+            LOGGER.warning(f"WARNING ⚠️ no model scale passed. Assuming scale='{scale}'.")
         depth, width, max_channels = scales[scale]
 
     if act:
@@ -675,9 +613,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             LOGGER.info(f"{colorstr('activation:')} {act}")  # print
 
     if verbose:
-        LOGGER.info(
-            f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}"
-        )
+        LOGGER.info(f"\n{'':>3}{'from':>20}{'n':>3}{'params':>10}  {'module':<45}{'arguments':<30}")
     ch = [ch]  # ch 存储每个layer的输入通道数 input channels
 
     # layers将每个layer存储进列表，save存储当前layer用到前面layer的index，c2每个layer的输出通道数
@@ -728,6 +664,10 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             C3x,
             RepC3,
             C2f_LVMB,
+            SimpleStem,
+            VisionClueMerge,
+            VSSBlock,
+            XSSBlock,
         }:
             # c1为layer的输入通道数，c2为layer的输出通道数
             c1, c2 = (ch[f], args[0])
@@ -737,13 +677,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
             # 如果是C2fAttn模块，则对输入通道数和输出通道数进行缩放
             if m is C2fAttn:
-                args[1] = make_divisible(
-                    min(args[1], max_channels // 2) * width, 8
-                )  # embed channels
+                args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)  # embed channels
                 args[2] = int(
-                    max(round(min(args[2], max_channels // 2 // 32)) * width, 1)
-                    if args[2] > 1
-                    else args[2]
+                    max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
                 )  # num heads
 
             # 将layer需要的所有参数组成一个列表，将在后面将列表作为layer的参数传出layer
@@ -760,6 +696,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
                 C3x,
                 RepC3,
                 C2f_LVMB,
+                XSSBlock,
             }:
                 args.insert(2, n)  # number of repeats
                 n = 1
@@ -805,13 +742,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         # m_.i：当前layer的索引， m_.f：当前layer的输入来自于那些layer的索引，m_.type：当前layer的类型
         m_.i, m_.f, m_.type = i, f, t  # attach index, 'from' index, type
         if verbose:
-            LOGGER.info(
-                f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<45}{str(args):<30}"
-            )  # print
+            LOGGER.info(f"{i:>3}{str(f):>20}{n_:>3}{m.np:10.0f}  {t:<45}{str(args):<30}")  # print
         # 将当前layer用到的前面layer的index进行存储
-        save.extend(
-            x % i for x in ([f] if isinstance(f, int) else f) if x != -1
-        )  # append to savelist
+        save.extend(x % i for x in ([f] if isinstance(f, int) else f) if x != -1)  # append to savelist
         # 将当前layer加入layers
         layers.append(m_)
         if i == 0:
@@ -827,14 +760,10 @@ def yaml_model_load(path):
     path = Path(path)
     if path.stem in (f"yolov{d}{x}6" for x in "nsmlx" for d in (5, 8)):
         new_stem = re.sub(r"(\d+)([nslmx])6(.+)?$", r"\1\2-p6\3", path.stem)
-        LOGGER.warning(
-            f"WARNING ⚠️ Ultralytics YOLO P6 models now use -p6 suffix. Renaming {path.stem} to {new_stem}."
-        )
+        LOGGER.warning(f"WARNING ⚠️ Ultralytics YOLO P6 models now use -p6 suffix. Renaming {path.stem} to {new_stem}.")
         path = path.with_name(new_stem + path.suffix)
 
-    unified_path = re.sub(
-        r"(\d+)([nslmx])(.+)?$", r"\1\3", str(path)
-    )  # i.e. yolov8x.yaml -> yolov8.yaml
+    unified_path = re.sub(r"(\d+)([nslmx])(.+)?$", r"\1\3", str(path))  # i.e. yolov8x.yaml -> yolov8.yaml
     yaml_file = check_yaml(unified_path, hard=False) or check_yaml(path)
     d = yaml_load(yaml_file)  # model dict
     d["scale"] = guess_model_scale(path)
@@ -857,9 +786,7 @@ def guess_model_scale(model_path):
     with contextlib.suppress(AttributeError):
         import re
 
-        return re.search(r"yolov\d+([nslmx])", Path(model_path).stem).group(
-            1
-        )  # n, s, m, l, or x
+        return re.search(r"yolov\d+([nslmx])", Path(model_path).stem).group(1)  # n, s, m, l, or x
     return ""
 
 

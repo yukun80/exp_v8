@@ -7,7 +7,7 @@ from functools import partial
 from timm.layers import DropPath
 
 try:
-    from mamba.mamba_ssm.ops.selective_scan_interface import (
+    from mamba_ssm.ops.selective_scan_interface import (
         selective_scan_fn,
         selective_scan_ref,
     )
@@ -15,7 +15,7 @@ except:
     pass
 
 try:
-    from mamba.mamba_ssm.modules.mamba2_simple import Mamba2Simple
+    from mamba_ssm.modules.mamba2_simple import Mamba2Simple
 except:
     pass
 

@@ -70,7 +70,7 @@ from ultralytics.data.dataset import YOLODataset
 from ultralytics.data.utils import check_cls_dataset, check_det_dataset
 from ultralytics.nn.autobackend import check_class_names, default_class_names
 from ultralytics.nn.modules import C2f, Detect, RTDETRDecoder
-from ultralytics.nn.tasks import DetectionModel, SegmentationModel, WorldModel
+from ultralytics.nn.tasks import DetectionModel, SegmentationModel
 from ultralytics.utils import (
     ARM64,
     DEFAULT_CFG,
@@ -211,13 +211,6 @@ class Exporter:
             assert self.device.type == "cpu", "optimize=True not compatible with cuda devices, i.e. use device='cpu'"
         if edgetpu and not LINUX:
             raise SystemError("Edge TPU export only supported on Linux. See https://coral.ai/docs/edgetpu/compiler/")
-        if isinstance(model, WorldModel):
-            LOGGER.warning(
-                "WARNING ⚠️ YOLOWorld (original version) export is not supported to any format.\n"
-                "WARNING ⚠️ YOLOWorldv2 models (i.e. 'yolov8s-worldv2.pt') only support export to "
-                "(torchscript, onnx, openvino, engine, coreml) formats. "
-                "See https://docs.ultralytics.com/models/yolo-world for details."
-            )
         if self.args.int8 and not self.args.data:
             self.args.data = DEFAULT_CFG.data or TASK2DATA[getattr(model, "task", "detect")]  # assign default data
             LOGGER.warning(
@@ -289,7 +282,7 @@ class Exporter:
 
         LOGGER.info(
             f"\n{colorstr('PyTorch:')} starting from '{file}' with input shape {tuple(im.shape)} BCHW and "
-            f'output shape(s) {self.output_shape} ({file_size(file):.1f} MB)'
+            f"output shape(s) {self.output_shape} ({file_size(file):.1f} MB)"
         )
 
         # Exports
@@ -335,11 +328,11 @@ class Exporter:
             predict_data = f"data={data}" if model.task == "segment" and fmt == "pb" else ""
             q = "int8" if self.args.int8 else "half" if self.args.half else ""  # quantization
             LOGGER.info(
-                f'\nExport complete ({time.time() - t:.1f}s)'
+                f"\nExport complete ({time.time() - t:.1f}s)"
                 f"\nResults saved to {colorstr('bold', file.parent.resolve())}"
-                f'\nPredict:         yolo predict task={model.task} model={f} imgsz={imgsz} {q} {predict_data}'
-                f'\nValidate:        yolo val task={model.task} model={f} imgsz={imgsz} data={data} {q} {s}'
-                f'\nVisualize:       https://netron.app'
+                f"\nPredict:         yolo predict task={model.task} model={f} imgsz={imgsz} {q} {predict_data}"
+                f"\nValidate:        yolo val task={model.task} model={f} imgsz={imgsz} data={data} {q} {s}"
+                f"\nVisualize:       https://netron.app"
             )
 
         self.run_callbacks("on_export_end")

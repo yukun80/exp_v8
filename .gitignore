@@ -42,6 +42,7 @@ MANIFEST
 *.txt
 *.cu
 *.cuh
+*.Identifier
 
 
 # 路径
@@ -49,6 +50,10 @@ fastsam_output/
 wandb/
 datasets/
 results/
+*__pycache__/
+*.egg-info/
+build/
+**.so
 
 # Installer logs
 pip-log.txt

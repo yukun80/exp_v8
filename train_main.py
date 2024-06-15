@@ -14,7 +14,7 @@ if __name__ == "__main__":
     model = YOLO(model="config/yolov8x-C2f-LVMB.yaml")
     model.train(
         # 233333
-        data="datastes/yolo_dataset_sub/yolo_sub.yaml",
+        data="datasets/yolo_dataset_sub/yolo_sub.yaml",
         epochs=1,
         batch=4,
         imgsz=512,
@@ -23,7 +23,7 @@ if __name__ == "__main__":
         device="0",
         overlap_mask=False,
         project="fastsam_output",
-        name="240611_y8_CAS_ba_Context",
+        name="240614_yoloUMamba_datasub",
         workers=8,
         cache=False,
         seed=3407,
