@@ -11,7 +11,9 @@ if __name__ == "__main__":
     device = torch.device("cuda")
     # choose your yaml file
     # model = YOLO("config/yolov8n-mamba-seg.yaml")
-    model = YOLO("config/yolov8-C2f-LVMB.yaml")
+    model = YOLO("config/yolov8-contextMamba-seg.yaml")  # FYK_240616
+    # model = YOLO("config/yolov8-seg-test.yaml")  # FYK_240616
+
     print("=========================================")
     model.info(detailed=True)
     try:

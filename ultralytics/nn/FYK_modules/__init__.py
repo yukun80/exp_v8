@@ -1,9 +1,6 @@
-from .block import ContextGuideFusionModule
-
-from .block import C2f_LVMB
-
-
+from .block import ContextGuideFusionModule, C2f_LVMB, MFACB
 from .mamba_yolo import SimpleStem, VisionClueMerge, VSSBlock, XSSBlock
+from .conv import ConvX, DepthwiseSeparableConv
 
 __all__ = (
     "ContextGuideFusionModule",
@@ -12,4 +9,6 @@ __all__ = (
     "VisionClueMerge",
     "VSSBlock",
     "XSSBlock",
+    "MFACB",
+    "DepthwiseSeparableConv",
 )

@@ -14,6 +14,8 @@ from ultralytics.nn.FYK_modules import (
     VisionClueMerge,
     VSSBlock,
     XSSBlock,
+    MFACB,
+    DepthwiseSeparableConv,
 )
 from ultralytics.nn.modules import (
     AIFI,
@@ -21,7 +23,6 @@ from ultralytics.nn.modules import (
     C2,
     C3,
     C3TR,
-    OBB,
     SPP,
     SPPELAN,
     SPPF,
@@ -34,7 +35,6 @@ from ultralytics.nn.modules import (
     C3x,
     CBFuse,
     CBLinear,
-    Classify,
     Concat,
     Conv,
     Conv2,
@@ -48,12 +48,10 @@ from ultralytics.nn.modules import (
     HGBlock,
     HGStem,
     ImagePoolingAttn,
-    Pose,
     RepC3,
     RepConv,
     RepNCSPELAN4,
     ResNetLayer,
-    RTDETRDecoder,
     Segment,
     Silence,
     WorldDetect,
@@ -321,7 +319,7 @@ class DetectionModel(BaseModel):
         if isinstance(m, Detect):  # includes all Detect subclasses like Segment, Pose, OBB, WorldDetect
             s = 256  # 2x min stride
             m.inplace = self.inplace
-            forward = lambda x: (self.forward(x)[0] if isinstance(m, (Segment, Pose, OBB)) else self.forward(x))
+            forward = lambda x: (self.forward(x)[0] if isinstance(m, (Segment)) else self.forward(x))
             try:
                 m.stride = torch.tensor([s / x.shape[-2] for x in forward(torch.zeros(1, ch, s, s))])  # forward
             except Exception as e:
@@ -589,14 +587,24 @@ def attempt_load_one_weight(weight, device=None, inplace=True, fuse=False):
     return model, ckpt
 
 
-def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
-    """Parse a YOLO model.yaml dictionary into a PyTorch model.
-    将一个 YOLO 模型的 YAML 配置文件解析为一个 PyTorch 模型"""
+def parse_model(d, ch, verbose=True):
+    """将一个 YOLO 模型的 YAML 配置文件解析为一个 PyTorch 模型
+    args:
+        d: YOLO 模型的 YAML 配置文件，以字典形式传入model_dict。
+        ch: 输入通道数（通常为 3，用于 RGB 图像）。
+        verbose: 是否打印详细信息。
+    """
     import ast
 
-    # Args
+    """模型的配置以字典的形式传入，分别获取类别数，缩放模块重复次数，缩放模型通道数，以及模型的激活函数。
+    Args:
+        nc: 类别数量。
+        act: 激活函数。
+        scales: 模型的缩放比例。
+        depth, width, kpt_shape: 分别代表深度系数、宽度系数和关键点形状。
+        max_channels: 最大通道数。
+    """
     max_channels = float("inf")
-    # 模型的配置以字典的形式传入，分别获取类别数，缩放模块重复次数，缩放模型通道数，以及模型的激活函数。
     nc, act, scales = (d.get(x) for x in ("nc", "activation", "scales"))
     depth, width, kpt_shape = (d.get(x, 1.0) for x in ("depth_multiple", "width_multiple", "kpt_shape"))
     if scales:
@@ -621,6 +629,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
 
     # 遍历backbone和head组成的列表生成网络 # from, number, module, args
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):
+        # print("=============================", i)
         # get module
         m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]
         # 遍历layer的参数，将其中的字符串元素转换为 Python 对象。
@@ -638,7 +647,6 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         # 如果重复次数大于1则缩放模块重复次数，并且重复次数最小为1；如果重复系数为1，不操作
         n = n_ = max(round(n * depth), 1) if n > 1 else n  # depth gain
         if m in {
-            Classify,
             Conv,
             ConvTranspose,
             GhostConv,
@@ -668,6 +676,8 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             VisionClueMerge,
             VSSBlock,
             XSSBlock,
+            MFACB,
+            DepthwiseSeparableConv,
         }:
             # c1为layer的输入通道数，c2为layer的输出通道数
             c1, c2 = (ch[f], args[0])
@@ -700,6 +710,9 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
             }:
                 args.insert(2, n)  # number of repeats
                 n = 1
+            # 添加中间层，层数与输入一致
+            if m in {MFACB}:
+                args.insert(0, c1)
         elif m is AIFI:
             args = [ch[f], *args]
         elif m in {HGStem, HGBlock}:
@@ -715,7 +728,7 @@ def parse_model(d, ch, verbose=True):  # model_dict, input_channels(3)
         elif m is Concat:
             # Concat操作的输出通道数为输入通道数之和
             c2 = sum(ch[x] for x in f)
-        elif m in {Detect, WorldDetect, Segment, Pose, OBB, ImagePoolingAttn}:
+        elif m in {Detect, WorldDetect, Segment, ImagePoolingAttn}:
             args.append([ch[x] for x in f])
             if m is Segment:
                 args[2] = make_divisible(min(args[2], max_channels) * width, 8)
@@ -835,12 +848,6 @@ def guess_model_task(model):
         for m in model.modules():
             if isinstance(m, Segment):
                 return "segment"
-            elif isinstance(m, Classify):
-                return "classify"
-            elif isinstance(m, Pose):
-                return "pose"
-            elif isinstance(m, OBB):
-                return "obb"
             elif isinstance(m, (Detect, WorldDetect)):
                 return "detect"
 

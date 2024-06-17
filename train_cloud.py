@@ -12,12 +12,12 @@ if __name__ == "__main__":
         sys.path.append(ultralytics_path)
 
     # build a new model from YAML
-    model = YOLO(model="config/yolov8-C2f-LVMB.yaml")
+    model = YOLO(model="config/yolov8-contextMamba-seg.yaml")
     # model.load("weights/yolov9e-seg.pt")
     model.train(
         # 233333
         data="datasets/CAS_balance_yolo_datasets/yolo_balance.yaml",
-        epochs=500,
+        epochs=600,
         batch=128,
         imgsz=512,
         save=True,
@@ -25,10 +25,10 @@ if __name__ == "__main__":
         device="0,1,2,3",
         overlap_mask=False,
         project="fastsam_output",
-        name="240614_yoloUMamba_balance",
-        workers=64,
+        name="240617_ContextMambaYolo",
+        workers=128,
         cache=True,
         seed=3407,
-        close_mosaic=250,
+        close_mosaic=300,
         patience=80,
     )
