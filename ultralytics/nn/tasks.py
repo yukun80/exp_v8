@@ -8,14 +8,19 @@ import torch
 import torch.nn as nn
 
 from ultralytics.nn.FYK_modules import (
-    ContextGuideFusionModule,
-    C2f_LVMB,
     SimpleStem,
     VisionClueMerge,
     VSSBlock,
     XSSBlock,
+    Base_XSSBlock,
+    Base_VSSBlock,
     MFACB,
+    Muti_AFF,
     DepthwiseSeparableConv,
+    DepthwiseSeparableCBAMConv,
+    FocalModulation,
+    EVCBlock,
+    GLSA,
 )
 from ultralytics.nn.modules import (
     AIFI,
@@ -630,9 +635,20 @@ def parse_model(d, ch, verbose=True):
     # 遍历backbone和head组成的列表生成网络 # from, number, module, args
     for i, (f, n, m, args) in enumerate(d["backbone"] + d["head"]):
         # print("=============================", i)
+        try:
+            if m == "node_mode":
+                m = d[m]
+                if len(args) > 0:
+                    if args[0] == "head_channel":
+                        args[0] = int(d[args[0]])
+            t = m
+            m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]  # get module
+        except:
+            pass
         # get module
-        m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]
+        # m = getattr(torch.nn, m[3:]) if "nn." in m else globals()[m]
         # 遍历layer的参数，将其中的字符串元素转换为 Python 对象。
+
         # 这是通过使用 ast.literal_eval() 函数来实现的，该函数可以安全地解析并执行一个字符串形式的 Python 表达式。
         for j, a in enumerate(args):
             if isinstance(a, str):
@@ -671,27 +687,26 @@ def parse_model(d, ch, verbose=True):
             DWConvTranspose2d,
             C3x,
             RepC3,
-            C2f_LVMB,
             SimpleStem,
             VisionClueMerge,
             VSSBlock,
             XSSBlock,
+            Base_XSSBlock,
+            Base_VSSBlock,
             MFACB,
             DepthwiseSeparableConv,
+            DepthwiseSeparableCBAMConv,
+            EVCBlock,
+            GLSA,
         }:
+            if args[0] == "head_channel":
+                args[0] = d[args[0]]
             # c1为layer的输入通道数，c2为layer的输出通道数
             c1, c2 = (ch[f], args[0])
             # if c2 not equal to number of classes (i.e. for Classify() output)
-            # 如果是类别数则不进行缩放；如果不是，则进行缩放
+            # 如果是类别数则不进行缩放；如果不是，则进行缩放，防止通道数过多=========
             if c2 != nc:
                 c2 = make_divisible(min(c2, max_channels) * width, 8)
-            # 如果是C2fAttn模块，则对输入通道数和输出通道数进行缩放
-            if m is C2fAttn:
-                args[1] = make_divisible(min(args[1], max_channels // 2) * width, 8)  # embed channels
-                args[2] = int(
-                    max(round(min(args[2], max_channels // 2 // 32)) * width, 1) if args[2] > 1 else args[2]
-                )  # num heads
-
             # 将layer需要的所有参数组成一个列表，将在后面将列表作为layer的参数传出layer
             args = [c1, c2, *args[1:]]
             if m in {
@@ -705,9 +720,10 @@ def parse_model(d, ch, verbose=True):
                 C3Ghost,
                 C3x,
                 RepC3,
-                C2f_LVMB,
                 XSSBlock,
+                Base_XSSBlock,
             }:
+                # print(f"ch1:{ch[f]}")
                 args.insert(2, n)  # number of repeats
                 n = 1
             # 添加中间层，层数与输入一致
@@ -728,6 +744,7 @@ def parse_model(d, ch, verbose=True):
         elif m is Concat:
             # Concat操作的输出通道数为输入通道数之和
             c2 = sum(ch[x] for x in f)
+            print(f"ch1:{ch[f[0]]}, ch2:{ch[f[1]]}, c2:{c2}")
         elif m in {Detect, WorldDetect, Segment, ImagePoolingAttn}:
             args.append([ch[x] for x in f])
             if m is Segment:
@@ -738,11 +755,14 @@ def parse_model(d, ch, verbose=True):
             args = [c1, c2, *args[1:]]
         elif m is CBFuse:
             c2 = ch[f[-1]]
-        elif m in {ContextGuideFusionModule}:
-            """2333在这里添加新的"""
-            c1 = [ch[x] for x in f]
-            c2 = 2 * c1[1]
-            args = [c1]
+        elif m is FocalModulation:
+            c2 = ch[f]
+            args = [c2, *args]
+        elif m is Muti_AFF:
+            c1, c2 = (ch[f[1]], ch[f[0]])
+            print(f"ch1:{ch[f[0]]}, ch2:{ch[f[1]]}, cout:{c2}")
+            # print(f"ch-3:{ch[-3]}, ch-4:{ch[-4]}")
+            args = [c1, c2]
         else:
             c2 = ch[f]
 

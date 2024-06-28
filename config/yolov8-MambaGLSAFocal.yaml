@@ -1,0 +1,67 @@
+# Ultralytics YOLO 🚀, AGPL-3.0 license
+# YOLOv8-seg instance segmentation model. For Usage examples see https://docs.ultralytics.com/tasks/segment
+################0628
+# Parameters
+nc: 80 # number of classes
+scales: # model compound scaling constants, i.e. 'model=yolov8n-seg.yaml' will call yolov8-seg.yaml with scale 'n'
+  # [depth, width, max_channels]
+  n: [0.33, 0.25, 1024]
+  s: [0.33, 0.50, 1024]
+  m: [0.67, 0.75, 768]
+  l: [1.00, 1.00, 512]
+  x: [1.00, 1.25, 512]
+# depth_multiple: 0.33  # model depth multiple 控制模型的深度，仅在repeats>1时有效
+# width_multiple: 0.25  # model width multiple 控制模型的宽度，主要作用于args中的ch_out参数（第一个）
+# 如第一个Conv层，ch_out=64，那么在v8n实际运算过程中，会将卷积过程中的卷积核设为64x0.25，所以会输出16通道的特征图。
+# 第三层重复三次，实际次数乘depth，n=3*d=3*0.33=1，所以实际上只会重复一次，即yolov8n只有一次C3f操作。
+
+# Mamba-YOLOv8.0n backbone
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, SimpleStem, [128, 3]]                 # 0-P2/4
+  - [-1, 3, Base_VSSBlock, [128]]                 # 1
+  - [-1, 1, VisionClueMerge, [256]]               # 2 p3/8
+
+  - [-1, 1, MFACB, [256, 3, 1, [2, 2, 2]]]        # 3
+  - [-1, 1, MFACB, [256, 3, 1, [3, 3, 3]]]        # 4
+  - [-3, 4, Base_VSSBlock, [256]]                 # 5
+  - [[-1, -2], 1, Concat, [1]]                    # 6
+  - [-1, 1, DepthwiseSeparableCBAMConv, [256]]    # 7
+
+  - [-1, 1, VisionClueMerge, [512]]               # 8 p4/16
+
+  - [-1, 1, MFACB, [512, 3, 1, [3, 3, 3]]]        # 9
+  - [-1, 1, MFACB, [512, 3, 1, [5, 5, 5]]]        # 10
+  - [-3, 4, Base_VSSBlock, [512]]                 # 11
+  - [[-1, -2], 1, Concat, [1]]                    # 12
+  - [-1, 1, DepthwiseSeparableCBAMConv, [512]]    # 13
+
+  - [-1, 1, VisionClueMerge, [1024]]              # 14 p5/32
+
+  - [-1, 3, Base_VSSBlock, [1024]]                # 15
+  - [-1, 1, FocalModulation, []]                  # 16
+
+# YOLOv8.0n head
+head:
+  - [7, 1, GLSA, [256]]                           # 17-P3/8
+  - [13, 1, GLSA, [512]]                          # 18-P4/16
+  - [16, 1, GLSA, [1024]]                         # 19-P5/32
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]    # 20 P5->P4
+  - [[-1, 18], 1, Concat, [1]]                    # 21
+  - [-1, 3, C2f, [512]]                           # 22
+
+  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]    # 23 P4->P3
+  - [[-1, 17], 1, Concat, [1]]                    # 24
+  - [-1, 3, C2f, [256]]                           # 25-P3/8
+
+  - [-1, 1, Conv, [256, 3, 2]]                     # 26 P2->P3
+  - [[-1, 22], 1, Concat, [1]]                    # 27
+  - [-1, 3, C2f, [512]]                           # 28-P3/8
+
+  - [-1, 1, Conv, [512, 3, 2]]                    # 29 P3->P4
+  - [[-1, 19], 1, Concat, [1]]                    # 30
+  - [-1, 3, C2f, [1024]]                          # 31-P4/16
+
+  - [[25, 28, 31], 1, Segment, [nc, 32, 256]]     # 32 Segment(P3, P4, P5)
+

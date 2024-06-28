@@ -1,8 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from ..modules.conv import CBAM
 
-__all__ = ["ConvX", "DepthwiseSeparableConv"]
+
+__all__ = ["ConvX", "DepthwiseSeparableConv", "DepthwiseSeparableCBAMConv"]
 
 
 class ConvX(nn.Module):
@@ -45,3 +47,33 @@ class DepthwiseSeparableConv(nn.Module):
         out = self.depthwise(x)
         out = self.pointwise(out)
         return out
+
+
+class DepthwiseSeparableCBAMConv(nn.Module):
+    def __init__(self, in_channels, out_channels, kernel_size=7):
+        super(DepthwiseSeparableCBAMConv, self).__init__()
+        self.cbam = CBAM(in_channels, kernel_size)
+        self.depthwise_separable_conv = DepthwiseSeparableConv(in_channels, out_channels)
+
+    def forward(self, x):
+        x = self.cbam(x)
+        x = self.depthwise_separable_conv(x)
+        return x
+
+
+if __name__ == "__main__":
+    """python -m ultralytics.nn.FYK_modules.conv"""
+    # model = ConvX(3, 64)
+    # x = torch.randn(2, 3, 224, 224)
+    # out = model(x)
+    # print(out.shape)
+
+    # model = DepthwiseSeparableConv(64, 128)
+    # x = torch.randn(2, 64, 56, 56)
+    # out = model(x)
+    # print(out.shape)
+
+    model = DepthwiseSeparableCBAMConv(64, 32)
+    input_tensor = torch.randn(2, 64, 128, 128)
+    out = model(input_tensor)
+    print(input_tensor.shape, out.shape)
